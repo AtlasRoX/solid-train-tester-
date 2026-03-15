@@ -103,10 +103,29 @@
         }
 
         .search-box:focus-within {
-            border-color: rgba(59, 130, 246, 0.5);
-            box-shadow: 0 0 30px -5px rgba(59, 130, 246, 0.3);
+            border-color: var(--dynamic-glow, rgba(59, 130, 246, 0.5));
+            box-shadow: 0 0 30px -5px var(--dynamic-shadow, rgba(59, 130, 246, 0.3));
             transform: translateY(-2px);
         }
+
+        .input-wrapper {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            padding: 0 1rem;
+        }
+
+        .provider-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255,255,255,0.4);
+            transition: all 0.3s ease;
+        }
+
+        .provider-icon svg { width: 100%; height: 100%; }
 
         input {
             flex: 1;
@@ -114,15 +133,15 @@
             border: none;
             color: white;
             font-size: 1.1rem;
-            padding: 1rem 1.5rem;
+            padding: 1rem 1rem;
             outline: none;
             font-family: 'JetBrains Mono', monospace;
         }
 
-        input::placeholder { color: rgba(255,255,255,0.2); }
+        input::placeholder { color: rgba(255,255,255,0.3); }
 
         button#fetchBtn {
-            background: linear-gradient(135deg, var(--primary-glow), var(--accent-glow));
+            background: var(--btn-gradient, linear-gradient(135deg, var(--primary-glow), var(--accent-glow)));
             color: white;
             border: none;
             padding: 0 2.5rem;
@@ -137,7 +156,27 @@
 
         button#fetchBtn:hover {
             opacity: 0.9;
-            box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 20px var(--dynamic-shadow, rgba(139, 92, 246, 0.4));
+        }
+
+        .detected-label {
+            position: absolute;
+            bottom: -28px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .detected-label.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
         }
 
         /* Grid Layout */
@@ -323,12 +362,18 @@
             <p class="subtitle">Enter your API key to auto-detect your provider and analyze available models.</p>
         </header>
 
-        <div class="search-box">
-            <input type="password" id="apiKey" placeholder="Auto-Detect API Key (Paste Here)" autocomplete="off">
+        <div class="search-box" id="searchBox">
+            <div class="input-wrapper">
+                <div class="provider-icon" id="providerIcon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                </div>
+                <input type="password" id="apiKey" placeholder="Paste your API key here..." autocomplete="off">
+            </div>
             <button id="fetchBtn">
-                <span id="btnText">Auto Detect Models</span>
+                <span id="btnText">Detect & Analyze</span>
                 <div class="loader" id="loader"></div>
             </button>
+            <div class="detected-label" id="detectedLabel"></div>
         </div>
 
         <div id="status"></div>
@@ -342,48 +387,97 @@
         const statusDiv = document.getElementById('status');
         const loader = document.getElementById('loader');
         const btnText = document.getElementById('btnText');
+        const searchBox = document.getElementById('searchBox');
+        const detectedLabel = document.getElementById('detectedLabel');
+        const providerIcon = document.getElementById('providerIcon');
+
+        // SVG Icons mapping
+        const ICONS = {
+            lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
+            check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`
+        };
+
+        // UI Brand Colors mapped to providers
+        const BRAND_COLORS = {
+            'Anthropic': { glow: 'rgba(217, 119, 87, 0.5)', shadow: 'rgba(217, 119, 87, 0.3)', btn: 'linear-gradient(135deg, #d97757, #9b543c)' },
+            'OpenAI': { glow: 'rgba(16, 163, 127, 0.5)', shadow: 'rgba(16, 163, 127, 0.3)', btn: 'linear-gradient(135deg, #10a37f, #0d8a6b)' },
+            'Google Gemini': { glow: 'rgba(66, 133, 244, 0.5)', shadow: 'rgba(66, 133, 244, 0.3)', btn: 'linear-gradient(135deg, #4285F4, #8b5cf6)' },
+            'Groq': { glow: 'rgba(245, 80, 54, 0.5)', shadow: 'rgba(245, 80, 54, 0.3)', btn: 'linear-gradient(135deg, #f55036, #c23c28)' },
+            'Mistral': { glow: 'rgba(249, 115, 22, 0.5)', shadow: 'rgba(249, 115, 22, 0.3)', btn: 'linear-gradient(135deg, #f97316, #ea580c)' },
+            'Cohere': { glow: 'rgba(59, 130, 246, 0.5)', shadow: 'rgba(59, 130, 246, 0.3)', btn: 'linear-gradient(135deg, #3b82f6, #2563eb)' },
+            'OpenRouter': { glow: 'rgba(139, 92, 246, 0.5)', shadow: 'rgba(139, 92, 246, 0.3)', btn: 'linear-gradient(135deg, #8b5cf6, #7c3aed)' }
+        };
+
+        function detectProvider(key) {
+            if (!key) return null;
+            if (key.startsWith('sk-ant-')) return { name: 'Anthropic', config: { url: 'https://api.anthropic.com/v1/models', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' } } };
+            if (key.startsWith('AIza')) return { name: 'Google Gemini', config: { url: `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=100`, headers: {} } };
+            if (key.startsWith('gsk_')) return { name: 'Groq', config: { url: 'https://api.groq.com/openai/v1/models', headers: { 'Authorization': `Bearer ${key}` } } };
+            if (key.startsWith('sk-proj-') || (key.startsWith('sk-') && key.length > 40 && !key.includes('or-'))) return { name: 'OpenAI', config: { url: 'https://api.openai.com/v1/models', headers: { 'Authorization': `Bearer ${key}` } } };
+            if (key.startsWith('sk-or-v1-')) return { name: 'OpenRouter', config: { url: 'https://openrouter.ai/api/v1/models', headers: { 'Authorization': `Bearer ${key}` } } };
+            if (key.length === 32 && /^[a-zA-Z0-9]+$/.test(key)) return { name: 'Mistral', config: { url: 'https://api.mistral.ai/v1/models', headers: { 'Authorization': `Bearer ${key}` } } };
+            if (key.length === 40 && /^[a-zA-Z0-9]+$/.test(key)) return { name: 'Cohere', config: { url: 'https://api.cohere.ai/v1/models', headers: { 'Authorization': `Bearer ${key}` } } };
+            return null;
+        }
+
+        // Real-time UI updates
+        apiKeyInput.addEventListener('input', (e) => {
+            const key = e.target.value.trim();
+            const providerInfo = detectProvider(key);
+
+            if (providerInfo) {
+                const colors = BRAND_COLORS[providerInfo.name] || { glow: 'rgba(59, 130, 246, 0.5)', shadow: 'rgba(59, 130, 246, 0.3)', btn: 'linear-gradient(135deg, #3b82f6, #8b5cf6)' };
+
+                // Update styling
+                searchBox.style.setProperty('--dynamic-glow', colors.glow);
+                searchBox.style.setProperty('--dynamic-shadow', colors.shadow);
+                fetchBtn.style.setProperty('--btn-gradient', colors.btn);
+
+                // Update Icon and Label
+                providerIcon.innerHTML = ICONS.check;
+                providerIcon.style.color = colors.glow.replace('0.5', '1');
+
+                detectedLabel.innerHTML = `✨ Auto-detected: <strong>${providerInfo.name}</strong>`;
+                detectedLabel.classList.add('visible');
+            } else {
+                // Reset styling
+                searchBox.style.removeProperty('--dynamic-glow');
+                searchBox.style.removeProperty('--dynamic-shadow');
+                fetchBtn.style.removeProperty('--btn-gradient');
+
+                providerIcon.innerHTML = ICONS.lock;
+                providerIcon.style.color = 'rgba(255,255,255,0.4)';
+
+                detectedLabel.classList.remove('visible');
+            }
+        });
+
+        // Trigger on Enter
+        apiKeyInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                fetchBtn.click();
+            }
+        });
 
         fetchBtn.addEventListener('click', async () => {
             const key = apiKeyInput.value.trim();
 
             if (!key) {
-                setStatus('Please enter an API Key to auto-detect', 'error');
+                setStatus('Please paste an API key first.', 'error');
                 shakeInput();
                 return;
             }
 
-            // Local regex-based heuristic to safely detect API keys without sending them to unknown providers
-            let detectedProviderName = null;
-            let config = null;
+            const providerInfo = detectProvider(key);
 
-            if (key.startsWith('sk-ant-')) {
-                detectedProviderName = 'Anthropic';
-                config = { url: 'https://api.anthropic.com/v1/models', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' } };
-            } else if (key.startsWith('AIza')) {
-                detectedProviderName = 'Google Gemini';
-                config = { url: `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=100`, headers: {} };
-            } else if (key.startsWith('gsk_')) {
-                detectedProviderName = 'Groq';
-                config = { url: 'https://api.groq.com/openai/v1/models', headers: { 'Authorization': `Bearer ${key}` } };
-            } else if (key.startsWith('sk-proj-') || (key.startsWith('sk-') && key.length > 40 && !key.includes('or-'))) {
-                detectedProviderName = 'OpenAI';
-                config = { url: 'https://api.openai.com/v1/models', headers: { 'Authorization': `Bearer ${key}` } };
-            } else if (key.startsWith('sk-or-v1-')) {
-                detectedProviderName = 'OpenRouter';
-                config = { url: 'https://openrouter.ai/api/v1/models', headers: { 'Authorization': `Bearer ${key}` } };
-            } else if (key.length === 32 && /^[a-zA-Z0-9]+$/.test(key)) {
-                // Mistral often uses 32 char alphanumeric
-                detectedProviderName = 'Mistral';
-                config = { url: 'https://api.mistral.ai/v1/models', headers: { 'Authorization': `Bearer ${key}` } };
-            } else if (key.length === 40 && /^[a-zA-Z0-9]+$/.test(key)) {
-                // Cohere often uses 40 char alphanumeric
-                detectedProviderName = 'Cohere';
-                config = { url: 'https://api.cohere.ai/v1/models', headers: { 'Authorization': `Bearer ${key}` } };
-            } else {
+            if (!providerInfo) {
                 setStatus('Could not safely auto-detect provider from key format. Please ensure key is correct.', 'error');
                 shakeInput();
                 return;
             }
+
+            const { name: detectedProviderName, config } = providerInfo;
 
             setLoading(true);
             grid.innerHTML = '';
@@ -421,7 +515,7 @@
                         id: id,
                         providerName: detectedProviderName,
                         displayName: m.displayName || m.name || id,
-                        description: m.description || m.pricing?.prompt ? `Prompt pricing: ${m.pricing.prompt}` : null,
+                        description: m.description || (m.pricing && m.pricing.prompt ? `Prompt pricing: ${m.pricing.prompt}` : null),
                         inputTokenLimit: m.inputTokenLimit || m.context_length || m.context_window || m.top_provider?.context_length,
                         outputTokenLimit: m.outputTokenLimit || m.top_provider?.max_completion_tokens,
                         version: m.version || 'N/A'
